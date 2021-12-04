@@ -1,0 +1,270 @@
+---
+title: "CT_TE"
+author: "Sicheng Hao"
+date: "11/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(causaldrf)
+library(causalweight)
+library(WeightIt)
+
+library(data.table)
+library(ggplot2)
+library(dplyr)
+'%!in%' <- function(x,y)!('%in%'(x,y))
+```
+
+
+## Load data
+```{r}
+setwd("/Users/sichenghao/Documents/GitHub/Resuscitation-CHF-ESRD/Data(MIMIC)/")
+cohort <- fread("cohort.csv")
+```
+
+
+## TB1
+```{r}
+# Table 1
+library(boot) 
+library(table1)
+
+cohort_nondup <- cohort %>% filter(subgroup %in% c("CHF", "ESRD", "Sepsis Only"))
+cohort_dup1 <- cohort %>% filter(subgroup == "CHF+ESRD") %>% mutate(subgroup = "CHF")
+cohort_dup2 <- cohort %>% filter(subgroup == "CHF+ESRD") %>% mutate(subgroup = "ESRD")
+cohort_cov <- rbind(cohort_nondup, cohort_dup1)
+cohort_cov <- rbind(cohort_cov, cohort_dup2)
+
+
+# cohort <- fread("cohort.csv")
+
+cohort_cov$status <- 
+  factor(cohort_cov$subgroup, 
+         levels=c("Sepsis Only","CHF","ESRD"),
+         labels=c("Sepsis Only",# Reference
+                  "CHF", 
+                  "ESRD"))
+cohort_cov$mort30 <- factor(cohort_cov$mort30, 
+                            levels = c(0, 1),
+                            labels = c("No death", "Death"))
+
+# cohort_cov$vaso <- factor(cohort_cov$vaso,
+#                       levels = c(0, 1),
+#                       labels = c("No vasopressor", "Vasopressor"))
+
+cohort_cov$fromED <- factor(cohort_cov$fromED,
+                        levels = c(0, 1),
+                        labels = c("Not From ED", "From ED"))
+# Vent
+# cohort_cov$vent <- factor(cohort_cov$vent,
+#                            levels = c("invasive","other"),
+#                            labels = c("Invasive","Other"))
+cohort_cov$lactate_cat <- factor(cohort_cov$lactate_cat,
+                                 levels = c("<2", "2-4", ">4", "missing"),
+                                 labels = c("<2", "2-4", ">4", "missing"))
+cohort_cov$gender <- factor(cohort_cov$gender,
+                            levels = c("M", "F"),
+                            labels = c("Male", "Female"))
+
+
+
+label(cohort_cov$treatment) <- "Treatment"
+label(cohort_cov$sofa_24hours) <- "Sofa Score"
+label(cohort_cov$day1) <- "First-day Crystalloids Treatment"
+label(cohort_cov$mort30) <- "30-day Mortality"
+#label(cohort_cov$vaso) <- "Vasopressor Condition"
+#label(cohort_cov$fromED) <- "From ED"
+label(cohort_cov$temperature) <- "Temperature"
+label(cohort_cov$heart_rate) <- "Heart Rate"
+label(cohort_cov$wbc) <- "White Blood Cell Level"
+#label(cohort_cov$vent) <- "Invasive Ventilation"
+label(cohort_cov$creatinine) <- "Creatinine"
+label(cohort_cov$lactate) <- "Lactate"
+label(cohort_cov$bicarbonate) <- "Bicarbonate"
+label(cohort_cov$hemoglobin) <- "Hemoglobin"
+label(cohort_cov$sodium) <- "Sodium"
+label(cohort_cov$potassium) <- "Potassium"
+label(cohort_cov$glucose) <- "Glucose"
+label(cohort_cov$platelet) <- "Platelet"
+label(cohort_cov$score) <- "Charlson"
+label(cohort_cov$sofa_delta) <- "Delta Sofa"
+#label(cohort_cov$troponin_t) <- "Troponin_t"
+
+table1(~ treatment + day1 + hospital_expire_flag + sofa_24hours + sofa_delta + score + age + gender  + temperature + heart_rate  + wbc + creatinine + lactate_cat + bicarbonate + hemoglobin + sodium  + potassium + glucose + platelet + pressor | status, data=cohort_cov)
+
+```
+## Distributions
+```{r,echo=F}
+chf<-cohort_cov%>%filter(status=="CHF")#4368
+esrd<-cohort_cov%>%filter(status=="ESRD")#1410
+
+hist(chf$treatment,breaks = 30)
+hist(esrd$treatment,breaks = 30)
+
+hist(chf$sofa_delta,breaks = 30)
+hist(esrd$sofa_delta,breaks = 30)
+
+# chfw0<-chf%>%filter(treatment!=0)#4403
+# esrdw0<-esrd%>%filter(treatment!=0)#1440
+# 
+# hist(chfw0$treatment,breaks = 30)
+# hist(esrdw0$treatment,breaks = 30)
+```
+
+
+
+
+## Propensity
+```{r}
+chf.id<-unique(chf$stay_id)
+test.id<-chf.id[sample(x = nrow(chf),size = 400)]
+train.id<-chf.id[chf.id%!in%test.id]
+chf.train<-chf%>%filter(stay_id%in%train.id)
+chf.test<-chf%>%filter(stay_id%in%test.id)
+
+fit<-lm(data = chf.train,treatment~score + age + gender  + temperature + heart_rate  + wbc + creatinine + lactate_cat + bicarbonate + hemoglobin + sodium  + potassium + glucose + platelet + pressor)
+summary(fit)
+
+
+chf.test$y_hat<-predict(fit,newdata = chf.test)
+
+
+```
+## CT ATE CHF
+```{r,echo=F}
+##H&I estimator
+chf_sub<-chf%>%filter(treatment<100,treatment>0)
+chf_sub$y<-as.numeric(as.factor(chf_sub$mort30))
+table(chf$y)
+hi_list <- hi_est(Y = y,
+                  treat = treatment,
+                  treat_formula = treatment ~ pressor + sofa_24hours + DNI, #+ temperature + heart_rate +wbc + creatinine +
+                    #lactate_cat + bicarbonate + hemoglobin + sodium + potassium + glucose, 
+                  outcome_formula = y ~ treatment + I(treatment^2) + gps + I(gps^2) + treatment * gps,
+                  data = chf_sub,
+                  grid_val = seq(0, 100, by = 10),
+                  #grid_val = c(seq(0, 50, by = 5),seq(50,100,by =10)),
+                  treat_mod = "LogNormal")
+sample_index <- sample(1:1000, 100)
+plot(chf_sub$treatment[sample_index],
+     chf_sub$y[sample_index],
+     xlab = "treatment",
+     ylab = "y",
+     main = "hi estimate")
+lines(seq(0, 100, by = 10),
+      hi_list$param,
+      lty = 2,
+      lwd = 2,
+      col = "blue")
+legend('bottomright',
+       "hi estimate",
+       lty=2,
+       lwd = 2,
+       col = "blue",
+       bty='y',
+       cex=1)
+```
+
+```{r,echo=F}
+##Spline estimator
+chf_sub<-chf%>%filter(treatment<100,treatment>0)
+chf_sub$y<-as.numeric(as.factor(chf_sub$mort30))
+
+spl_list <- add_spl_est(Y = y,
+                  treat = treatment,
+                  treat_formula = treatment ~ pressor + sofa_24hours + DNI + temperature + heart_rate +wbc + creatinine,
+                    #lactate_cat + bicarbonate + hemoglobin + sodium + potassium + glucose, 
+                  #outcome_formula = y ~ treatment + I(treatment^2) + gps + I(gps^2) + treatment * gps,
+                  data = chf_sub,
+                  grid_val = seq(0, 100, by = 10),
+                  knot_num = 3,
+                  treat_mod = "LogNormal")
+sample_index <- sample(1:1000, 100)
+plot(chf_sub$treatment[sample_index],
+     chf_sub$y[sample_index],
+     xlab = "treatment",
+     ylab = "y",
+     main = "spl estimate")
+lines(seq(0, 100, by = 10),
+      spl_list$param,
+      lty = 2,
+      lwd = 2,
+      col = "blue")
+legend('bottomright',
+       "spl estimate",
+       lty=2,
+       lwd = 2,
+       col = "blue",
+       bty='y',
+       cex=1)
+```
+
+
+## CT ATE ESRD
+```{r,echo=F}
+##H&I estimator
+esrd_sub<-esrd%>%filter(treatment<100,treatment>0)
+esrd_sub$y<-as.numeric(as.factor(esrd_sub$mort30))
+table(esrd$y)
+hi_list <- hi_est(Y = y,
+                  treat = treatment,
+                  treat_formula = treatment ~ pressor + sofa_24hours + DNI, #+ temperature + heart_rate +wbc + creatinine +
+                    #lactate_cat + bicarbonate + hemoglobin + sodium + potassium + glucose, 
+                  outcome_formula = y ~ treatment + I(treatment^2) + gps + I(gps^2) + treatment * gps,
+                  data = esrd_sub,
+                  grid_val = seq(0, 100, by = 10),
+                  treat_mod = "LogNormal")
+sample_index <- sample(1:1000, 100)
+plot(esrd_sub$treatment[sample_index],
+     esrd_sub$y[sample_index],
+     xlab = "treatment",
+     ylab = "y",
+     main = "hi estimate")
+lines(seq(0, 100, by = 10),
+      hi_list$param,
+      lty = 2,
+      lwd = 2,
+      col = "blue")
+legend('bottomright',
+       "hi estimate",
+       lty=2,
+       lwd = 2,
+       col = "blue",
+       bty='y',
+       cex=1)
+```
+
+```{r,echo=F}
+##Spline estimator
+esrd_sub<-esrd%>%filter(treatment<100,treatment>0)
+esrd_sub$y<-as.numeric(as.factor(esrd_sub$mort30))
+
+spl_list <- add_spl_est(Y = y,
+                  treat = treatment,
+                  treat_formula = treatment ~ pressor + sofa_24hours + DNI + temperature + heart_rate +wbc + creatinine +
+                    lactate_cat + bicarbonate + hemoglobin + sodium + glucose, 
+                  #outcome_formula = y ~ treatment + I(treatment^2) + gps + I(gps^2) + treatment * gps,
+                  data = esrd_sub,
+                  grid_val = seq(0, 100, by = 10),
+                  knot_num = 3,
+                  treat_mod = "LogNormal")
+sample_index <- sample(1:1000, 100)
+plot(esrd_sub$treatment[sample_index],
+     esrd_sub$y[sample_index],
+     xlab = "treatment",
+     ylab = "y",
+     main = "spl estimate")
+lines(seq(0, 100, by = 10),
+      spl_list$param,
+      lty = 2,
+      lwd = 2,
+      col = "blue")
+legend('bottomright',
+       "spl estimate",
+       lty=2,
+       lwd = 2,
+       col = "blue",
+       bty='y',
+       cex=1)
+```
