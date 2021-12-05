@@ -1,7 +1,6 @@
 ---
 title: "CT_TE"
 author: "Sicheng Hao"
-date: "11/8/2021"
 output: html_document
 ---
 
@@ -19,7 +18,7 @@ library(dplyr)
 
 ## Load data
 ```{r}
-setwd("/Users/sichenghao/Documents/GitHub/Resuscitation-CHF-ESRD/Data(MIMIC)/")
+#setwd("/Users/sichenghao/Documents/GitHub/Resuscitation-CHF-ESRD/Data(MIMIC)/")
 cohort <- fread("cohort.csv")
 ```
 
