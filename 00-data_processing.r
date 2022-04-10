@@ -18,4 +18,4 @@ cohort_cov <- rbind(cohort_nondup, cohort_dup1)
 cohort_cov <- rbind(cohort_cov, cohort_dup2)
 
 setwd("/Users/sichenghao/Documents/GitHub/Resuscitation-Public-/")
-fwrite(cohort,"cohort.csv")
+fwrite(cohort,"mimic-iv-cohort.csv")

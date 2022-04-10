@@ -18,7 +18,7 @@ library(dplyr)
 ## Load data
 ```{r,echo = F}
 #setwd("/Users/sichenghao/Documents/GitHub/Resuscitation-CHF-ESRD/Data(MIMIC)/")
-cohort <- fread("cohort.csv")
+cohort <- fread("mimic-iv-cohort.csv")
 ```
 
 
